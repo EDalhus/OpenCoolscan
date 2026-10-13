@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "NikonScan",
+    name: "OpenCoolscan",
     platforms: [.macOS(.v13)],
     targets: [
         .executableTarget(
-            name: "NikonScan",
-            path: "Sources/NikonScan",
+            name: "OpenCoolscan",
+            path: "Sources/OpenCoolscan",
             resources: [.copy("Resources")]
         )
     ]

@@ -233,7 +233,7 @@ final class WindowManager: ObservableObject {
         let window = NSWindow(contentRect: vf,
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
-        window.title = "Nikon Scan"
+        window.title = "OpenCoolscan"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
@@ -253,10 +253,10 @@ final class WindowManager: ObservableObject {
         hosting.sizingOptions = []
         window.contentView = hosting
 
-        if !window.setFrameUsingName("NikonScan.main") {
+        if !window.setFrameUsingName("OpenCoolscan.main") {
             window.setFrame(vf, display: false)
         }
-        window.setFrameAutosaveName("NikonScan.main")
+        window.setFrameAutosaveName("OpenCoolscan.main")
         mainWindow = window
     }
 
@@ -360,7 +360,7 @@ final class WindowManager: ObservableObject {
 
     // MARK: Persistence
 
-    private let defaultsKey = "NikonScan.panelLayout"
+    private let defaultsKey = "OpenCoolscan.panelLayout"
 
     func save() {
         var dict: [String: [Double]] = [:]
@@ -396,7 +396,7 @@ struct AppDesktopView: View {
     var body: some View {
         VStack(spacing: 0) {
             AquaTitleBar(
-                title: "Nikon Scan",
+                title: "OpenCoolscan",
                 height: DesignLayout.titleHeight,
                 onClose:    { NSApp.terminate(nil) },
                 onMinimize: { windows.minimizeMainWindow() },

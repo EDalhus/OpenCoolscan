@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 @main
-struct NikonScanApp: App {
+struct OpenCoolscanApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var scannerManager = AppModel.shared.scanner
     @StateObject private var scanSettings   = AppModel.shared.settings
