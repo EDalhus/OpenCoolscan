@@ -90,6 +90,13 @@ struct ToolPaletteRoot: View {
 
     var body: some View {
         ToolPaletteWindow(histogram: workspace.histogram, onClose: onClose)
+            .overlay(alignment: .bottom) {
+                PanelResizeHandle(mode: .height)
+                    .frame(height: 6)
+                    .onHover { inside in
+                        if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
+                    }
+            }
     }
 }
 
@@ -130,7 +137,7 @@ struct ScannerWindow: View {
                     title: scannerTitle(scanner.connectedScanner),
                     height: DesignLayout.titleHeight,
                     onClose:    { windows.closeScannerWindow() },
-                    onMinimize: { windows.minimizeScannerWindow() },
+                    onMinimize: { windows.toggleCollapsed(.scanner) },
                     onZoom:     { windows.showAll() },
                     onTitleClick: showScannerMenu
                 )
@@ -446,7 +453,7 @@ struct LeftDrawer: View {
                 .fill(Color.aquaSidePanel)
                 .overlay(DrawerShape().stroke(Color(hex: 0x6E6E6E), lineWidth: 1))
 
-            WindowDragArea().padding(.top, 10).padding(.trailing, 10)
+            DragHandle().padding(.top, 10).padding(.trailing, 10)
 
             orb("Prefs", color: Color(hex: 0x8CC4F2), dark: Color(hex: 0x2A6CB8), center: CGPoint(x: 33.5, y: 59.4), action: onPrefs)
             orb("Help",  color: Color(hex: 0x9EE6CF), dark: Color(hex: 0x2F9A80), center: CGPoint(x: 87.1, y: 45.2), action: onHelp)

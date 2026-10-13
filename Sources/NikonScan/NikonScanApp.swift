@@ -9,8 +9,8 @@ struct NikonScanApp: App {
     @StateObject private var windows        = AppModel.shared.windows
 
     var body: some Scene {
-        // The scanner, image, progress and palette windows are free-floating
-        // NSWindows managed by WindowManager; this scene only provides Preferences.
+        // The main window and its floating panels are created by WindowManager;
+        // this scene only provides Preferences.
         Settings {
             PreferencesView()
                 .environmentObject(scanSettings)
@@ -74,6 +74,7 @@ struct NikonScanApp: App {
 
                 Button("Show All Windows") { windows.showAll() }
                     .keyboardShortcut("0", modifiers: .command)
+                Button("Reset Window Layout") { windows.resetLayout() }
             }
 
             CommandGroup(after: .saveItem) {

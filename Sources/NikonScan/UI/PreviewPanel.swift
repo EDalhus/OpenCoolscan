@@ -46,13 +46,13 @@ struct ImageWindow: View {
                         Color.white.frame(width: scroller)
                     }
                     .frame(height: topRuler)
-                    .overlay(WindowDragArea())
+                    .overlay(DragHandle())
                     .overlay(alignment: .bottom) { Color(hex: 0x9A9A9A).frame(height: 1) }
 
                     HStack(spacing: 0) {
                         RulerView(axis: .vertical, imageRect: rect, pixelLength: pixelLength(.vertical))
                             .frame(width: leftRuler)
-                            .overlay(WindowDragArea())
+                            .overlay(DragHandle())
                             .overlay(alignment: .trailing) { Color(hex: 0x9A9A9A).frame(width: 1) }
                         imageArea(rect: rect)
                             .frame(width: content.width, height: content.height)
@@ -63,7 +63,7 @@ struct ImageWindow: View {
                     HStack(spacing: 0) {
                         ScrollerTrack(axis: .horizontal)
                         GrowBox()
-                            .overlay(WindowResizeHandle(minSize: DesignLayout.imageMinSize))
+                            .overlay(PanelResizeHandle())
                             .frame(width: scroller)
                     }
                     .frame(height: scroller)

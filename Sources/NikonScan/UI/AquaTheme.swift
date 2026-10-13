@@ -58,7 +58,7 @@ struct AquaTitleBar: View {
     var body: some View {
         ZStack {
             LinearGradient(colors: [.aquaTitleTop, .aquaTitleBottom], startPoint: .top, endPoint: .bottom)
-            WindowDragArea()
+            DragHandle()
 
             HStack(spacing: showsAllLights ? 8 : 0) {
                 AquaLight(color: .red, diameter: height * 0.6, action: onClose)

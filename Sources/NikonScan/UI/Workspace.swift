@@ -21,7 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppModel.shared.windows.showAll()
         // Don't let window restoration reopen Preferences on launch.
         DispatchQueue.main.async {
-            for window in NSApp.windows where !(window is ChromelessWindow || window is ChromelessPanel) && window.isVisible {
+            for window in NSApp.windows where window !== AppModel.shared.windows.mainWindow && window.isVisible {
                 window.close()
             }
         }
@@ -168,80 +168,82 @@ final class Workspace: ObservableObject {
     }
 }
 
-// MARK: - Floating windows
+// MARK: - Panels living inside the main app window
 
-/// Borderless window that draws its own Aqua chrome but can still become key.
-final class ChromelessWindow: NSWindow {
-    init(size: CGSize) {
-        super.init(contentRect: NSRect(origin: .zero, size: size),
-                   styleMask: [.borderless, .miniaturizable],
-                   backing: .buffered, defer: false)
-        isOpaque = false
-        backgroundColor = .clear
-        hasShadow = true
-        isReleasedWhenClosed = false
-    }
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
+enum PanelID: String, CaseIterable {
+    case image, progress, scanner, palette
 }
 
-/// Floating utility panel (Tool Palette, Progress).
-final class ChromelessPanel: NSPanel {
-    init(size: CGSize) {
-        super.init(contentRect: NSRect(origin: .zero, size: size),
-                   styleMask: [.borderless],
-                   backing: .buffered, defer: false)
-        isOpaque = false
-        backgroundColor = .clear
-        hasShadow = true
-        isFloatingPanel = true
-        hidesOnDeactivate = true
-        becomesKeyOnlyIfNeeded = true
-        isReleasedWhenClosed = false
-    }
-    override var canBecomeKey: Bool { true }
+private struct PanelIDKey: EnvironmentKey {
+    static let defaultValue: PanelID? = nil
 }
 
+extension EnvironmentValues {
+    /// The panel a view belongs to; nil for the main window's own chrome.
+    var panelID: PanelID? {
+        get { self[PanelIDKey.self] }
+        set { self[PanelIDKey.self] = newValue }
+    }
+}
+
+/// Positions, sizes, stacking order and visibility of the floating panels.
+/// Panels the user has not moved follow the design layout as the window resizes.
 @MainActor
 final class WindowManager: ObservableObject {
     private unowned let model: AppModel
-    private var scannerWindow: NSWindow?
-    private var imageWindow: NSWindow?
-    private var progressWindow: NSWindow?
-    private var paletteWindow: NSWindow?
+    private(set) var mainWindow: NSWindow?
+
+    @Published private var positions: [PanelID: CGPoint] = [:]
+    @Published private var imageSizeOverride: CGSize?
+    @Published private var paletteHeightOverride: CGFloat?
+    @Published private(set) var order: [PanelID] = [.image, .progress, .scanner, .palette]
+    @Published private(set) var collapsed: Set<PanelID> = []
+    @Published var containerSize: CGSize = DesignLayout.defaultSize
 
     @Published var showPalette: Bool {
-        didSet { UserDefaults.standard.set(showPalette, forKey: "showToolPalette"); updateVisibility() }
+        didSet { UserDefaults.standard.set(showPalette, forKey: "showToolPalette") }
     }
     @Published var showProgress: Bool {
-        didSet { UserDefaults.standard.set(showProgress, forKey: "showProgressWindow"); updateVisibility() }
+        didSet { UserDefaults.standard.set(showProgress, forKey: "showProgressWindow") }
     }
 
     init(model: AppModel) {
         self.model = model
         showPalette = UserDefaults.standard.object(forKey: "showToolPalette") as? Bool ?? true
         showProgress = UserDefaults.standard.object(forKey: "showProgressWindow") as? Bool ?? true
+        load()
     }
 
+    // MARK: Main window
+
     func showAll() {
-        if scannerWindow == nil { createWindows() }
-        imageWindow?.orderFront(nil)
-        scannerWindow?.makeKeyAndOrderFront(nil)
-        updateVisibility()
+        if mainWindow == nil { createMainWindow() }
+        showPalette = true
+        showProgress = true
+        mainWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
     func closeScannerWindow() { NSApp.terminate(nil) }
-    func minimizeScannerWindow() { scannerWindow?.miniaturize(nil) }
+    func minimizeMainWindow() { mainWindow?.miniaturize(nil) }
+    func zoomMainWindow() { mainWindow?.zoom(nil) }
 
-    private func updateVisibility() {
-        guard scannerWindow != nil else { return }
-        if showPalette { paletteWindow?.orderFront(nil) } else { paletteWindow?.orderOut(nil) }
-        if showProgress { progressWindow?.orderFront(nil) } else { progressWindow?.orderOut(nil) }
-    }
+    private func createMainWindow() {
+        let vf = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let window = NSWindow(contentRect: vf,
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        window.title = "Nikon Scan"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            window.standardWindowButton(kind)?.isHidden = true
+        }
+        window.backgroundColor = NSColor(Color.aquaDesktop)
+        window.minSize = NSSize(width: 960, height: 640)
+        window.isReleasedWhenClosed = false
 
-    private func host<V: View>(_ view: V, in window: NSWindow, title: String) {
-        let root = view
+        let root = AppDesktopView()
             .environmentObject(model.scanner)
             .environmentObject(model.settings)
             .environmentObject(model.workspace)
@@ -250,89 +252,256 @@ final class WindowManager: ObservableObject {
         let hosting = NSHostingView(rootView: root)
         hosting.sizingOptions = []
         window.contentView = hosting
-        window.title = title
-        window.isExcludedFromWindowsMenu = false
-        // The shadow follows the drawn (non-transparent) shapes once they have rendered.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { window.invalidateShadow() }
+
+        if !window.setFrameUsingName("NikonScan.main") {
+            window.setFrame(vf, display: false)
+        }
+        window.setFrameAutosaveName("NikonScan.main")
+        mainWindow = window
     }
 
-    private func createWindows() {
-        let vf = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+    // MARK: Geometry
+
+    private var defaultImageSize: CGSize {
         let L = DesignLayout.self
+        return CGSize(
+            width: max(L.imageMinSize.width,
+                       containerSize.width - L.imageLeft - L.imageGapToPalette - L.paletteWidth - L.paletteRightGap),
+            height: max(L.imageMinSize.height, containerSize.height - L.imageTop - L.imageBottomGap))
+    }
 
-        // Positions are given as top-left offsets within the visible screen area.
-        func place(_ w: NSWindow, name: String, x: CGFloat, y: CGFloat, size: CGSize) {
-            if !w.setFrameUsingName(name) {
-                w.setFrame(NSRect(x: vf.minX + x, y: vf.maxY - y - size.height,
-                                  width: size.width, height: size.height), display: false)
-            }
-            w.setFrameAutosaveName(name)
+    func size(for id: PanelID) -> CGSize {
+        let L = DesignLayout.self
+        let full: CGSize
+        switch id {
+        case .scanner:  full = L.scannerWindowSize
+        case .image:    full = imageSizeOverride ?? defaultImageSize
+        case .progress: full = L.progressSize
+        case .palette:  full = CGSize(width: L.paletteWidth,
+                                      height: paletteHeightOverride ?? max(200, containerSize.height - L.paletteTop - 6))
         }
+        return collapsed.contains(id) ? CGSize(width: full.width, height: titleHeight(id)) : full
+    }
 
-        let scanner = ChromelessWindow(size: L.scannerWindowSize)
-        host(ScannerWindowRoot(), in: scanner, title: "Nikon Scan")
-        place(scanner, name: "NikonScan.scanner", x: 3, y: 0, size: L.scannerWindowSize)
-        scannerWindow = scanner
+    func titleHeight(_ id: PanelID) -> CGFloat {
+        switch id {
+        case .scanner:  return DesignLayout.titleHeight
+        case .image:    return 19
+        case .progress: return 16
+        case .palette:  return 20
+        }
+    }
 
-        let imageSize = CGSize(
-            width: max(L.imageMinSize.width, vf.width - L.imageLeft - L.imageGapToPalette - L.paletteWidth - L.paletteRightGap),
-            height: max(L.imageMinSize.height, vf.height - L.imageTop - L.imageBottomGap))
-        let image = ChromelessWindow(size: imageSize)
-        host(ImageWindowRoot(), in: image, title: "Image")
-        place(image, name: "NikonScan.image", x: L.imageLeft, y: L.imageTop, size: imageSize)
-        imageWindow = image
+    func position(for id: PanelID) -> CGPoint {
+        clamp(positions[id] ?? defaultPosition(id), id)
+    }
 
-        let progress = ChromelessPanel(size: L.progressSize)
-        host(ProgressWindow(onClose: { [weak self] in self?.showProgress = false }), in: progress, title: "Progress")
-        place(progress, name: "NikonScan.progress", x: L.progressInset.x,
-              y: max(L.scannerWindowSize.height + 8, vf.height - L.progressInset.y - L.progressSize.height),
-              size: L.progressSize)
-        progressWindow = progress
+    private func defaultPosition(_ id: PanelID) -> CGPoint {
+        let L = DesignLayout.self
+        switch id {
+        case .scanner:  return CGPoint(x: 3, y: 0)
+        case .image:    return CGPoint(x: L.imageLeft, y: L.imageTop)
+        case .progress: return CGPoint(x: L.progressInset.x,
+                                       y: max(L.scannerWindowSize.height + 6,
+                                              containerSize.height - L.progressInset.y - L.progressSize.height))
+        case .palette:  return CGPoint(x: containerSize.width - L.paletteRightGap - L.paletteWidth, y: L.paletteTop)
+        }
+    }
 
-        let paletteSize = CGSize(width: L.paletteWidth, height: vf.height - L.paletteTop - 4)
-        let palette = ChromelessPanel(size: paletteSize)
-        host(ToolPaletteRoot(onClose: { [weak self] in self?.showPalette = false }), in: palette, title: "Tool Palette 1")
-        place(palette, name: "NikonScan.palette", x: vf.width - L.paletteRightGap - L.paletteWidth,
-              y: L.paletteTop, size: paletteSize)
-        paletteWindow = palette
+    /// Keeps at least the title bar reachable inside the app window.
+    private func clamp(_ p: CGPoint, _ id: PanelID) -> CGPoint {
+        let w = size(for: id).width
+        return CGPoint(x: min(max(p.x, 60 - w), containerSize.width - 60),
+                       y: min(max(p.y, 0), containerSize.height - 20))
+    }
+
+    // MARK: Interaction
+
+    func isVisible(_ id: PanelID) -> Bool {
+        switch id {
+        case .palette:  return showPalette
+        case .progress: return showProgress
+        default:        return true
+        }
+    }
+
+    func bringToFront(_ id: PanelID) {
+        guard order.last != id else { return }
+        order.removeAll { $0 == id }
+        order.append(id)
+    }
+
+    func move(_ id: PanelID, to p: CGPoint) {
+        positions[id] = clamp(p, id)
+    }
+
+    func resizeImage(to size: CGSize) {
+        imageSizeOverride = CGSize(width: max(DesignLayout.imageMinSize.width, size.width),
+                                   height: max(DesignLayout.imageMinSize.height, size.height))
+    }
+
+    func resizePalette(height: CGFloat) {
+        paletteHeightOverride = max(160, height)
+    }
+
+    func toggleCollapsed(_ id: PanelID) {
+        guard id != .image else { return }
+        if collapsed.contains(id) { collapsed.remove(id) } else { collapsed.insert(id) }
+        save()
+    }
+
+    func resetLayout() {
+        positions = [:]
+        imageSizeOverride = nil
+        paletteHeightOverride = nil
+        collapsed = []
+        save()
+    }
+
+    // MARK: Persistence
+
+    private let defaultsKey = "NikonScan.panelLayout"
+
+    func save() {
+        var dict: [String: [Double]] = [:]
+        for (id, p) in positions { dict[id.rawValue] = [p.x, p.y] }
+        if let s = imageSizeOverride { dict["imageSize"] = [s.width, s.height] }
+        if let h = paletteHeightOverride { dict["paletteHeight"] = [h] }
+        dict["collapsed"] = PanelID.allCases.map { collapsed.contains($0) ? 1 : 0 }
+        UserDefaults.standard.set(dict, forKey: defaultsKey)
+    }
+
+    private func load() {
+        guard let dict = UserDefaults.standard.dictionary(forKey: defaultsKey) as? [String: [Double]] else { return }
+        for id in PanelID.allCases {
+            if let v = dict[id.rawValue], v.count == 2 { positions[id] = CGPoint(x: v[0], y: v[1]) }
+        }
+        if let v = dict["imageSize"], v.count == 2 { imageSizeOverride = CGSize(width: v[0], height: v[1]) }
+        if let v = dict["paletteHeight"], v.count == 1 { paletteHeightOverride = v[0] }
+        if let v = dict["collapsed"], v.count == PanelID.allCases.count {
+            collapsed = Set(PanelID.allCases.enumerated().filter { v[$0.offset] == 1 }.map(\.element))
+        }
     }
 }
 
-// MARK: - Window resizing (grow box)
+// MARK: - App window content
 
-/// Drag to resize the window, keeping its top-left corner fixed.
-struct WindowResizeHandle: NSViewRepresentable {
-    var minSize: CGSize
+/// The main app window: full-width Aqua title bar over a gray work area that
+/// hosts the floating panels.
+struct AppDesktopView: View {
+    @EnvironmentObject var windows: WindowManager
+    @EnvironmentObject var settings: ScanSettings
+    @EnvironmentObject var workspace: Workspace
 
-    final class HandleView: NSView {
-        var minSize: CGSize = .zero
-        private var startFrame: NSRect = .zero
-        private var startMouse: NSPoint = .zero
+    var body: some View {
+        VStack(spacing: 0) {
+            AquaTitleBar(
+                title: "Nikon Scan",
+                height: DesignLayout.titleHeight,
+                onClose:    { NSApp.terminate(nil) },
+                onMinimize: { windows.minimizeMainWindow() },
+                onZoom:     { windows.zoomMainWindow() }
+            )
 
-        override func mouseDown(with event: NSEvent) {
-            startFrame = window?.frame ?? .zero
-            startMouse = NSEvent.mouseLocation
+            GeometryReader { geo in
+                ZStack(alignment: .topLeading) {
+                    Color.aquaDesktop
+
+                    ForEach(PanelID.allCases, id: \.self) { id in
+                        if windows.isVisible(id) {
+                            let p = windows.position(for: id)
+                            let size = windows.size(for: id)
+                            panel(id)
+                                .frame(width: size.width, height: size.height, alignment: .top)
+                                .clipped()
+                                .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 3)
+                                .environment(\.panelID, id)
+                                .simultaneousGesture(TapGesture().onEnded { windows.bringToFront(id) })
+                                .offset(x: p.x, y: p.y)
+                                .zIndex(Double(windows.order.firstIndex(of: id) ?? 0))
+                        }
+                    }
+                }
+                .coordinateSpace(name: "desktop")
+                .clipped()
+                .onAppear { windows.containerSize = geo.size }
+                .onChange(of: geo.size) { windows.containerSize = $0 }
+            }
         }
-
-        override func mouseDragged(with event: NSEvent) {
-            guard let window else { return }
-            let p = NSEvent.mouseLocation
-            let w = max(minSize.width, startFrame.width + (p.x - startMouse.x))
-            let h = max(minSize.height, startFrame.height - (p.y - startMouse.y))
-            window.setFrame(NSRect(x: startFrame.minX, y: startFrame.maxY - h, width: w, height: h), display: true)
-        }
-
-        override func mouseUp(with event: NSEvent) { window?.invalidateShadow() }
-
-        override func resetCursorRects() {
-            addCursorRect(bounds, cursor: .crosshair)
-        }
+        .ignoresSafeArea()
     }
 
-    func makeNSView(context: Context) -> HandleView {
-        let v = HandleView()
-        v.minSize = minSize
-        return v
+    @ViewBuilder
+    private func panel(_ id: PanelID) -> some View {
+        switch id {
+        case .scanner:  ScannerWindowRoot()
+        case .image:    ImageWindowRoot()
+        case .progress: ProgressWindow(onClose: { windows.showProgress = false })
+        case .palette:  ToolPaletteRoot(onClose: { windows.showPalette = false })
+        }
     }
-    func updateNSView(_ nsView: HandleView, context: Context) { nsView.minSize = minSize }
+}
+
+/// Moves the panel it belongs to (or the app window, for the main title bar).
+/// Double-click rolls a panel up into its title bar.
+struct DragHandle: View {
+    @Environment(\.panelID) private var panelID
+    @EnvironmentObject private var windows: WindowManager
+    @State private var start: CGPoint?
+
+    var body: some View {
+        if let id = panelID {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { windows.toggleCollapsed(id) }
+                .gesture(
+                    DragGesture(minimumDistance: 1, coordinateSpace: .named("desktop"))
+                        .onChanged { g in
+                            if start == nil {
+                                start = windows.position(for: id)
+                                windows.bringToFront(id)
+                            }
+                            guard let s = start else { return }
+                            windows.move(id, to: CGPoint(x: s.x + g.translation.width, y: s.y + g.translation.height))
+                        }
+                        .onEnded { _ in
+                            start = nil
+                            windows.save()
+                        }
+                )
+        } else {
+            WindowDragArea()
+        }
+    }
+}
+
+/// Grow box / edge handle that resizes a panel, keeping its top-left fixed.
+struct PanelResizeHandle: View {
+    enum Mode { case both, height }
+    var mode: Mode = .both
+    @Environment(\.panelID) private var panelID
+    @EnvironmentObject private var windows: WindowManager
+    @State private var start: CGSize?
+
+    var body: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .named("desktop"))
+                    .onChanged { g in
+                        guard let id = panelID else { return }
+                        if start == nil { start = windows.size(for: id) }
+                        guard let s = start else { return }
+                        switch mode {
+                        case .both:   windows.resizeImage(to: CGSize(width: s.width + g.translation.width,
+                                                                     height: s.height + g.translation.height))
+                        case .height: windows.resizePalette(height: s.height + g.translation.height)
+                        }
+                    }
+                    .onEnded { _ in
+                        start = nil
+                        windows.save()
+                    }
+            )
+    }
 }
