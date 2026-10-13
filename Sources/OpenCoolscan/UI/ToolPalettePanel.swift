@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoolscanKit
 
 // MARK: - Tool Palette window (right side, disclosure rows like Nikon Scan 4)
 

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoolscanKit
 
 // MARK: - Palette (sampled from the Nikon Scan 4 design reference)
 

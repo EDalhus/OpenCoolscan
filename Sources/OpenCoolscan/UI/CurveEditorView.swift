@@ -1,4 +1,5 @@
 import SwiftUI
+import CoolscanKit
 
 /// Nikon Scan–style curve editor: white grid, gray histogram, black curve,
 /// square handles. A linear curve shows a midpoint handle that adds a point when dragged.

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoolscanKit
 
 struct PreferencesView: View {
     @EnvironmentObject var settings: ScanSettings

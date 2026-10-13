@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoolscanKit
 
 // MARK: - Image Window (Processed / Natural tabs, rulers, crop marquee)
 

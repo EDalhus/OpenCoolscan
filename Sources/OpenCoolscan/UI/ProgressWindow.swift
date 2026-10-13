@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoolscanKit
 
 // MARK: - Progress window (batch status, queue and log)
 
