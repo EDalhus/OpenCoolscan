@@ -140,6 +140,9 @@ struct MainView: View {
         .onReceive(scanner.$lastError) { error in
             if error != nil { showErrorAlert = true }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .nikonRedrawRequested)) { _ in
+            if let raw = rawFrameImage { refreshDisplay(from: raw) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .nikonSaveRequested)) { _ in
             saveCurrentImage()
         }

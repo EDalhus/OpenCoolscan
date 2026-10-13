@@ -216,6 +216,25 @@ class ScanSettings: ObservableObject {
     // Color adjustments
     @Published var colorBalance: SIMD3<Double> = .zero  // R, G, B offset
     @Published var saturation: Double = 0.0             // -100...100
+    @Published var colorBrightness: Double = 0.0        // -100...100 (Color Balance ▸ Brightness)
+
+    // Analog gain per channel, in EV (-2...2); master gain is `brightness`
+    @Published var analogGain: SIMD3<Double> = .zero
+
+    // Unsharp mask
+    @Published var usmIntensity: Double = 50    // 0...100 %
+    @Published var usmHaloWidth: Double = 5     // 0...100 px
+    @Published var usmThreshold: Double = 4     // 0...100 levels
+
+    // Digital ICE⁴ post processing
+    @Published var icePostProcessing: Bool = false
+    @Published var rocLevel: Double = 5         // 0...10
+    @Published var gemLevel: Double = 3         // 0...4
+    @Published var deeEnabled: Bool = false
+    @Published var deeShadow: Double = 50       // 0...100
+
+    // Scan Image Enhancer (automatic tone/color correction)
+    @Published var sieEnabled: Bool = false
 
     // Scan area (normalized 0...1)
     @Published var cropRect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)
@@ -223,6 +242,7 @@ class ScanSettings: ObservableObject {
     // Hardware
     @Published var autoFocus: Bool = true
     @Published var focusPosition: Double = 0.0  // manual focus: -5...5 mm
+    @Published var manualFocusSteps: Int = 236  // Scanner Extras ▸ Manual Focus Adjustment (0...500)
     @Published var exposureLock: Bool = false
     @Published var multiScan: Bool = false
     @Published var multiScanCount: Int = 4     // 4 or 8x averaging
@@ -256,6 +276,17 @@ class ScanSettings: ObservableObject {
         curves = Curves()
         colorBalance = .zero
         saturation = 0
+        colorBrightness = 0
+        analogGain = .zero
+        usmIntensity = 50
+        usmHaloWidth = 5
+        usmThreshold = 4
+        icePostProcessing = false
+        rocLevel = 5
+        gemLevel = 3
+        deeEnabled = false
+        deeShadow = 50
+        sieEnabled = false
         cropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
         rotation = 0
         autoAlign = true

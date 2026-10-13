@@ -153,7 +153,11 @@ struct WindowConfigurator: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
-        DispatchQueue.main.async { configure(view.window) }
+        DispatchQueue.main.async {
+            configure(view.window)
+            // Don't start with a palette value field focused.
+            view.window?.makeFirstResponder(nil)
+        }
         return view
     }
 
@@ -432,5 +436,245 @@ struct UnevenTopRoundedRect: Shape {
         p.addQuadCurve(to: CGPoint(x: r.maxX, y: r.minY + radius), control: CGPoint(x: r.maxX, y: r.minY))
         p.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
         return p
+    }
+}
+
+// MARK: - Tool Palette controls
+
+/// Small square arrow button (◀ / ▶) at either end of an Aqua slider.
+struct AquaStepButton: View {
+    let left: Bool
+    var enabled = true
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                LinearGradient(colors: [Color(hex: 0xFFFFFF), Color(hex: 0xDADADA)], startPoint: .top, endPoint: .bottom)
+                Rectangle().stroke(Color(hex: enabled ? 0x6A6A6A : 0xB0B0B0), lineWidth: 1)
+                Image(systemName: left ? "arrowtriangle.left.fill" : "arrowtriangle.right.fill")
+                    .font(.system(size: 6))
+                    .foregroundColor(Color(hex: enabled ? 0x222222 : 0xAAAAAA))
+            }
+            .frame(width: 12, height: 12)
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+}
+
+/// Thin track with a glossy blue knob.
+struct AquaSliderTrack: View {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    var step: Double = 1
+    var enabled = true
+
+    var body: some View {
+        GeometryReader { geo in
+            let knob: CGFloat = 15
+            let w = geo.size.width - knob
+            let frac = (value - range.lowerBound) / (range.upperBound - range.lowerBound)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(LinearGradient(colors: [Color(hex: 0xB9B9B9), Color(hex: 0xEDEDED)], startPoint: .top, endPoint: .bottom))
+                    .overlay(Capsule().stroke(Color(hex: enabled ? 0x8A8A8A : 0xBDBDBD), lineWidth: 0.75))
+                    .frame(height: 4.5)
+                    .padding(.horizontal, 2)
+                AquaKnob(enabled: enabled)
+                    .frame(width: knob, height: knob)
+                    .offset(x: w * CGFloat(min(1, max(0, frac))))
+            }
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { g in
+                guard enabled, w > 0 else { return }
+                let f = Double(min(1, max(0, (g.location.x - knob / 2) / w)))
+                let raw = range.lowerBound + f * (range.upperBound - range.lowerBound)
+                value = (raw / step).rounded() * step
+            })
+        }
+    }
+}
+
+struct AquaKnob: View {
+    var enabled = true
+    var body: some View {
+        ZStack {
+            Circle().fill(RadialGradient(
+                colors: enabled ? [Color(hex: 0xB8D6FA), Color(hex: 0x3F7EDB)] : [Color(hex: 0xF4F4F4), Color(hex: 0xC8C8C8)],
+                center: UnitPoint(x: 0.5, y: 0.8), startRadius: 0, endRadius: 10))
+            Circle().stroke(Color(hex: enabled ? 0x2F5EA8 : 0xA8A8A8), lineWidth: 0.75)
+            Ellipse()
+                .fill(LinearGradient(colors: [.white.opacity(0.9), .white.opacity(0)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 9, height: 6)
+                .offset(y: -3.5)
+        }
+        .shadow(color: .black.opacity(enabled ? 0.3 : 0.1), radius: 0.8, y: 0.8)
+    }
+}
+
+/// White numeric box at the right of a slider row.
+struct AquaValueField: View {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    var decimals = 0
+    var enabled = true
+
+    var body: some View {
+        TextField("", value: Binding(
+            get: { value },
+            set: { value = min(range.upperBound, max(range.lowerBound, $0)) }
+        ), format: .number.precision(.fractionLength(decimals)).grouping(.never)
+            .locale(Locale(identifier: "en_US_POSIX")))
+            .textFieldStyle(.plain)
+            .multilineTextAlignment(.trailing)
+            .font(.lucida(11.5))
+            .foregroundColor(enabled ? .aquaText : Color(hex: 0xAAAAAA))
+            .padding(.horizontal, 3)
+            .frame(width: 33, height: 15)
+            .background { Color.white }
+            .overlay(Rectangle().stroke(Color(hex: enabled ? 0x7A7A7A : 0xC0C0C0), lineWidth: 1))
+            .disabled(!enabled)
+    }
+}
+
+/// ◀ ——●—— ▶ [value]
+struct AquaSliderControl: View {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    var step: Double = 1
+    var decimals = 0
+    var enabled = true
+
+    var body: some View {
+        HStack(spacing: 2) {
+            AquaStepButton(left: true, enabled: enabled) { value = max(range.lowerBound, value - step) }
+            AquaSliderTrack(value: $value, range: range, step: step, enabled: enabled)
+                .frame(height: 16)
+            AquaStepButton(left: false, enabled: enabled) { value = min(range.upperBound, value + step) }
+            AquaValueField(value: $value, range: range, decimals: decimals, enabled: enabled)
+                .padding(.leading, 3)
+        }
+    }
+}
+
+/// Label on the left, slider control on the right.
+struct AquaSliderRow: View {
+    let label: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    var step: Double = 1
+    var decimals = 0
+    var enabled = true
+    var labelWidth: CGFloat = 72
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.lucida(11.5))
+                .foregroundColor(enabled ? Color(hex: 0x2A2A2A) : Color(hex: 0xAAAAAA))
+                .lineLimit(1)
+                .frame(width: labelWidth, alignment: .leading)
+            AquaSliderControl(value: $value, range: range, step: step, decimals: decimals, enabled: enabled)
+        }
+        .frame(height: 20)
+    }
+}
+
+/// Aqua checkbox — blue when checked.
+struct AquaCheckbox: View {
+    let title: String
+    @Binding var isOn: Bool
+    var enabled = true
+
+    var body: some View {
+        Button { isOn.toggle() } label: {
+            HStack(spacing: 7) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 2.5)
+                        .fill(LinearGradient(
+                            colors: isOn ? [Color(hex: 0xA9CBF6), Color(hex: 0x4A86DE)] : [Color(hex: 0xFFFFFF), Color(hex: 0xE2E2E2)],
+                            startPoint: .top, endPoint: .bottom))
+                    RoundedRectangle(cornerRadius: 2.5)
+                        .stroke(Color(hex: isOn ? 0x3A68B0 : 0x7A7A7A), lineWidth: 1)
+                    if isOn {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 8.5, weight: .bold))
+                            .foregroundColor(Color(hex: 0x10204A))
+                    }
+                }
+                .frame(width: 13, height: 13)
+                Text(title)
+                    .font(.lucida(12))
+                    .foregroundColor(enabled ? .aquaText : Color(hex: 0xAAAAAA))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+}
+
+/// Rounded popup with a blue up/down arrow segment on the right.
+struct AquaBluePopup: View {
+    let label: String
+    var enabled = true
+    let items: () -> [PopupMenu.Item]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(label)
+                .font(.lucida(12))
+                .foregroundColor(enabled ? .aquaText : Color(hex: 0xAAAAAA))
+                .lineLimit(1)
+                .padding(.leading, 7)
+            Spacer(minLength: 2)
+            ZStack {
+                LinearGradient(colors: [Color(hex: 0x9CC2F5), Color(hex: 0x3D78DA)], startPoint: .top, endPoint: .bottom)
+                VStack(spacing: 1) {
+                    Image(systemName: "arrowtriangle.up.fill")
+                    Image(systemName: "arrowtriangle.down.fill")
+                }
+                .font(.system(size: 5))
+                .foregroundColor(.white)
+            }
+            .frame(width: 15)
+        }
+        .frame(height: 16)
+        .background { LinearGradient(colors: [Color(hex: 0xFFFFFF), Color(hex: 0xE8E8E8)], startPoint: .top, endPoint: .bottom) }
+        .clipShape(RoundedRectangle(cornerRadius: 3))
+        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(hex: 0x7A7A7A), lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture { if enabled { PopupMenu.show(items()) } }
+    }
+}
+
+/// RGB / R / G / B segmented control.
+struct AquaSegmented<T: Hashable>: View {
+    let options: [(T, String)]
+    @Binding var selection: T
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(options.enumerated()), id: \.offset) { idx, opt in
+                let selected = opt.0 == selection
+                Text(opt.1)
+                    .font(.lucida(11))
+                    .foregroundColor(selected ? .white : .aquaText)
+                    .frame(width: 26, height: 14)
+                    .background {
+                        LinearGradient(colors: selected ? [Color(hex: 0x8DB8F4), Color(hex: 0x3F7ADB)]
+                                                        : [Color(hex: 0xFFFFFF), Color(hex: 0xE0E0E0)],
+                                       startPoint: .top, endPoint: .bottom)
+                    }
+                    .overlay(alignment: .leading) {
+                        if idx > 0 { Color(hex: 0x7A7A7A).frame(width: 1) }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { selection = opt.0 }
+            }
+        }
+        .overlay(Rectangle().stroke(Color(hex: 0x6A6A6A), lineWidth: 1))
     }
 }

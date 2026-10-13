@@ -27,12 +27,24 @@ struct ImageProcessor {
             }
         }
 
-        // 2. Contrast
-        if settings.contrast != 0 {
+        // 1b. Per-channel analog gain (EV)
+        let gain = settings.analogGain
+        if gain != .zero, let filter = CIFilter(name: "CIColorMatrix") {
+            filter.setValue(processed, forKey: kCIInputImageKey)
+            filter.setValue(CIVector(x: pow(2, gain.x), y: 0, z: 0, w: 0), forKey: "inputRVector")
+            filter.setValue(CIVector(x: 0, y: pow(2, gain.y), z: 0, w: 0), forKey: "inputGVector")
+            filter.setValue(CIVector(x: 0, y: 0, z: pow(2, gain.z), w: 0), forKey: "inputBVector")
+            filter.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
+            filter.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputBiasVector")
+            processed = filter.outputImage ?? processed
+        }
+
+        // 2. Brightness / contrast
+        if settings.contrast != 0 || settings.colorBrightness != 0 {
             let contrastValue = Float(1.0 + settings.contrast * 0.25)
             if let filter = CIFilter(name: "CIColorControls") {
                 filter.setValue(processed, forKey: kCIInputImageKey)
-                filter.setValue(Float(0),        forKey: kCIInputBrightnessKey)
+                filter.setValue(Float(settings.colorBrightness / 200), forKey: kCIInputBrightnessKey)
                 filter.setValue(contrastValue,   forKey: kCIInputContrastKey)
                 filter.setValue(Float(1.0),      forKey: kCIInputSaturationKey)
                 processed = filter.outputImage ?? processed
@@ -75,8 +87,48 @@ struct ImageProcessor {
             }
         }
 
+        // 5b. Scan Image Enhancer — automatic tone/color correction
+        if settings.sieEnabled {
+            for filter in processed.autoAdjustmentFilters(options: [.redEye: false]) {
+                filter.setValue(processed, forKey: kCIInputImageKey)
+                processed = filter.outputImage ?? processed
+            }
+        }
+
+        // 5c. Digital DEE — shadow recovery
+        if settings.deeEnabled, let filter = CIFilter(name: "CIHighlightShadowAdjust") {
+            filter.setValue(processed, forKey: kCIInputImageKey)
+            filter.setValue(Float(settings.deeShadow / 100), forKey: "inputShadowAmount")
+            processed = filter.outputImage ?? processed
+        }
+
+        // 5d. ICE post processing: ROC (color restoration) and GEM (grain smoothing)
+        if settings.icePostProcessing {
+            if settings.rocLevel > 0, let filter = CIFilter(name: "CIVibrance") {
+                filter.setValue(processed, forKey: kCIInputImageKey)
+                filter.setValue(Float(settings.rocLevel / 10), forKey: "inputAmount")
+                processed = filter.outputImage ?? processed
+            }
+            if settings.gemLevel > 0, let filter = CIFilter(name: "CINoiseReduction") {
+                filter.setValue(processed, forKey: kCIInputImageKey)
+                filter.setValue(Float(settings.gemLevel * 0.01), forKey: "inputNoiseLevel")
+                filter.setValue(Float(0.4), forKey: "inputSharpness")
+                processed = filter.outputImage ?? processed
+            }
+        }
+
         // 6. Tone curves
         processed = applyCurves(settings.curves, to: processed)
+
+        // 6b. Unsharp mask (threshold is not supported by Core Image's filter)
+        if settings.usmIntensity > 0, settings.usmHaloWidth > 0,
+           let filter = CIFilter(name: "CIUnsharpMask") {
+            let extent = processed.extent
+            filter.setValue(processed.clampedToExtent(), forKey: kCIInputImageKey)
+            filter.setValue(Float(settings.usmHaloWidth), forKey: kCIInputRadiusKey)
+            filter.setValue(Float(settings.usmIntensity / 100), forKey: kCIInputIntensityKey)
+            processed = filter.outputImage?.cropped(to: extent) ?? processed
+        }
 
         // 7. Rotation
         if settings.rotation != 0 {

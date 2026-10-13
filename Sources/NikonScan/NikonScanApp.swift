@@ -41,6 +41,16 @@ struct NikonScanApp: App {
                 .keyboardShortcut(".", modifiers: .command)
                 .disabled(!scannerManager.isBusy)
 
+                Picker("Resolution", selection: $scanSettings.resolution) {
+                    ForEach(scannerManager.connectedScanner?.model.availableResolutions ?? [300, 600, 1200, 2400, 4000],
+                            id: \.self) { r in
+                        Text("\(r) dpi").tag(r)
+                    }
+                }
+                Toggle("Auto Focus", isOn: $scanSettings.autoFocus)
+
+                Divider()
+
                 Button("Eject Film") { scannerManager.eject() }
                     .keyboardShortcut("e", modifiers: .command)
                     .disabled(scannerManager.connectedScanner == nil || scannerManager.isBusy)
@@ -54,6 +64,7 @@ struct NikonScanApp: App {
                 Toggle("Tool Palette", isOn: $showToolPalette)
                     .keyboardShortcut("t", modifiers: [.command, .option])
                 Toggle("Progress", isOn: $showProgressWindow)
+                Toggle("Auto-Align Frame", isOn: $scanSettings.autoAlign)
                 Divider()
                 Button("Rotate Left") { scanSettings.rotation = (scanSettings.rotation + 270) % 360 }
                     .keyboardShortcut("[", modifiers: .command)
@@ -69,6 +80,12 @@ struct NikonScanApp: App {
                 .disabled(scannerManager.previewImage == nil
                           && scannerManager.scannedImage == nil
                           && scannerManager.displayedImage == nil)
+
+                Picker("Save Format", selection: $scanSettings.outputFormat) {
+                    ForEach(OutputFormat.allCases) { fmt in
+                        Text(fmt.rawValue).tag(fmt)
+                    }
+                }
 
                 Button("Batch Save Frames...") {
                     do {

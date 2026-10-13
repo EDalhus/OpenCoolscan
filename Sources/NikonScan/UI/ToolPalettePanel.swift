@@ -18,15 +18,20 @@ struct ToolPaletteWindow: View {
         var id: String { rawValue }
     }
 
-    @State private var expanded: Set<Section> = []
+    @AppStorage("toolPaletteExpanded") private var expandedRaw = ""
+
+    private var expanded: Set<Section> {
+        get { Set(expandedRaw.split(separator: "|").compactMap { Section(rawValue: String($0)) }) }
+        nonmutating set { expandedRaw = Section.allCases.filter(newValue.contains).map(\.rawValue).joined(separator: "|") }
+    }
 
     var body: some View {
         AquaWindow {
             VStack(spacing: 0) {
                 AquaTitleBar(
                     title: "Tool Palette 1",
-                    height: 16,
-                    fontSize: 12,
+                    height: 20,
+                    fontSize: 12.5,
                     onClose: onClose,
                     onMinimize: { expanded = [] },
                     onZoom: { expanded = expanded.count == Section.allCases.count ? [] : Set(Section.allCases) }
@@ -39,12 +44,10 @@ struct ToolPaletteWindow: View {
                             if expanded.contains(section) {
                                 content(for: section)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background { Color(hex: 0xDEDEDE) }
-                                    .overlay(alignment: .bottom) { Color(hex: 0x9A9A9A).frame(height: 1) }
                             }
+                            PaletteSeparator()
                         }
                     }
-                    .padding(.top, 3)
                 }
             }
             .frame(maxHeight: .infinity, alignment: .top)
@@ -63,10 +66,10 @@ struct ToolPaletteWindow: View {
         switch section {
         case .curves:        CurvesContent(histogram: histogram)
         case .colorBalance:  ColorBalanceContent()
-        case .unsharpMask:   UnavailableContent(text: "Unsharp Mask is not implemented yet.")
+        case .unsharpMask:   UnsharpMaskContent()
         case .digitalICE:    DigitalICEContent()
         case .analogGain:    AnalogGainContent()
-        case .enhancer:      FilmPresetContent()
+        case .enhancer:      ScanImageEnhancerContent()
         case .scannerExtras: ScannerExtrasContent()
         }
     }
@@ -89,18 +92,19 @@ struct PaletteRow: View {
                 Spacer()
             }
             .padding(.leading, 7)
-            .frame(height: 23)
-            .background(LinearGradient(colors: [Color(hex: 0xF0F0F0), Color(hex: 0xE4E4E4)],
-                                       startPoint: .top, endPoint: .bottom))
+            .frame(height: 21)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .overlay(alignment: .bottom) {
-            VStack(spacing: 0) {
-                Color(hex: 0x7A7A7A).frame(height: 1.2)
-                Color.white.frame(height: 1)
-            }
+    }
+}
+
+/// Thick gray divider between palette sections.
+struct PaletteSeparator: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            Color(hex: 0x8E8E8E).frame(height: 2.5)
+            Color.white.frame(height: 1)
         }
-        .padding(.bottom, 1)
     }
 }
