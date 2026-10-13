@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoolscanKit
 
 // MARK: - Tool Palette section contents (laid out after the Nikon Scan 4 reference)
 

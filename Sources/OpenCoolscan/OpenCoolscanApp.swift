@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoolscanKit
 
 @main
 struct OpenCoolscanApp: App {

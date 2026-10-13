@@ -38,6 +38,10 @@ The app is not notarized, so the first time macOS will refuse to open it. Right-
 xattr -dr com.apple.quarantine /Applications/OpenCoolscan.app
 ```
 
+## Architecture
+
+The scanner core — USB detection, SANE/`coolscan3` preview and scanning, settings and image processing — lives in the [CoolscanKit](https://github.com/EDalhus/CoolscanKit) Swift package. OpenCoolscan pins CoolscanKit to an exact version and contains only the Nikon Scan 4–style interface.
+
 ## Build from source
 
 ```bash

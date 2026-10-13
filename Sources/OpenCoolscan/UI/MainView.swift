@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Combine
+import CoolscanKit
 
 // MARK: - Layout (points, measured from the Nikon Scan 4 design reference)
 

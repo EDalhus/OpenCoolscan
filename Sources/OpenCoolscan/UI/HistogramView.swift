@@ -1,4 +1,5 @@
 import SwiftUI
+import CoolscanKit
 
 struct HistogramView: View {
     let histogram: HistogramData
