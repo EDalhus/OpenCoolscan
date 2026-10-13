@@ -116,7 +116,7 @@ struct AquaLight: View {
     }
 }
 
-/// Body of a floating Aqua window: optional title bar plus a shadowed panel.
+/// Body of a floating Aqua window (the NSWindow draws the drop shadow).
 struct AquaWindow<Content: View>: View {
     let content: Content
     init(@ViewBuilder content: () -> Content) { self.content = content() }
@@ -125,7 +125,6 @@ struct AquaWindow<Content: View>: View {
         content
             .background { Color.aquaWindow }
             .overlay(Rectangle().stroke(Color.black.opacity(0.35), lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 3)
     }
 }
 
@@ -145,37 +144,6 @@ struct WindowDragArea: NSViewRepresentable {
     }
     func makeNSView(context: Context) -> NSView { DragView() }
     func updateNSView(_ nsView: NSView, context: Context) {}
-}
-
-/// Hides the native title bar chrome; the design draws its own.
-struct WindowConfigurator: NSViewRepresentable {
-    let title: String
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            configure(view.window)
-            // Don't start with a palette value field focused.
-            view.window?.makeFirstResponder(nil)
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { configure(nsView.window) }
-    }
-
-    private func configure(_ window: NSWindow?) {
-        guard let window else { return }
-        window.title = title
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        window.styleMask.insert(.fullSizeContentView)
-        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-            window.standardWindowButton(kind)?.isHidden = true
-        }
-        window.backgroundColor = NSColor(Color.aquaDesktop)
-    }
 }
 
 // MARK: - Popup menus

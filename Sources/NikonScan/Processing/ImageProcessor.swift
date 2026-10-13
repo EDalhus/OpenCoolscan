@@ -6,7 +6,7 @@ struct ImageProcessor {
     private static let sharedContext = CIContext(options: [.useSoftwareRenderer: false])
 
     /// `includeCrop: false` renders the full frame so the UI can draw the crop marquee on top.
-    static func apply(settings: ScanSettings, to image: NSImage, includeCrop: Bool = true) -> NSImage {
+    static func apply(settings: ScanSettings, to image: NSImage, includeCrop: Bool = true, frame: Int? = nil) -> NSImage {
         var rect = NSRect(origin: .zero, size: image.size)
         guard let cgImage = image.cgImage(forProposedRect: &rect, context: nil, hints: nil) else { return image }
         let ciImage = CIImage(cgImage: cgImage)
@@ -130,16 +130,6 @@ struct ImageProcessor {
             processed = filter.outputImage?.cropped(to: extent) ?? processed
         }
 
-        // 7. Rotation
-        if settings.rotation != 0 {
-            let radians = CGFloat(settings.rotation) * .pi / 180.0
-            processed = processed.transformed(by: CGAffineTransform(rotationAngle: radians))
-            processed = processed.transformed(by: CGAffineTransform(
-                translationX: -processed.extent.minX,
-                y: -processed.extent.minY
-            ))
-        }
-
         // 8. Frame alignment trim (on original pixel space estimate)
         let rightTrim = computeFrameTrim(cgImage: cgImage, settings: settings)
         if rightTrim > 0 {
@@ -157,12 +147,37 @@ struct ImageProcessor {
             }
         }
 
+        // 9. Orientation (rotate / mirror) — last, so crop and trim stay in raw scanner space
+        processed = orient(processed, frame.map { settings.orientation(for: $0) } ?? settings.defaultOrientation)
+
         guard let cgOut = sharedContext.createCGImage(processed, from: processed.extent) else { return image }
         let outSize = CGSize(width: processed.extent.width, height: processed.extent.height)
         return NSImage(cgImage: cgOut, size: outSize)
     }
 
     // MARK: - Crop
+
+    /// Applies only rotation/mirroring (used for auto-saved raw scans).
+    static func orient(_ image: NSImage, _ orientation: FrameOrientation) -> NSImage {
+        guard !orientation.isIdentity else { return image }
+        var rect = NSRect(origin: .zero, size: image.size)
+        guard let cg = image.cgImage(forProposedRect: &rect, context: nil, hints: nil) else { return image }
+        let out = orient(CIImage(cgImage: cg), orientation)
+        guard let cgOut = sharedContext.createCGImage(out, from: out.extent) else { return image }
+        return NSImage(cgImage: cgOut, size: out.extent.size)
+    }
+
+    private static func orient(_ image: CIImage, _ o: FrameOrientation) -> CIImage {
+        guard !o.isIdentity else { return image }
+        var img = image
+        if o.flipHorizontal { img = img.transformed(by: CGAffineTransform(scaleX: -1, y: 1)) }
+        if o.flipVertical   { img = img.transformed(by: CGAffineTransform(scaleX: 1, y: -1)) }
+        if o.rotation != 0 {
+            // Core Image's y axis points up, so a negative angle turns the picture clockwise.
+            img = img.transformed(by: CGAffineTransform(rotationAngle: -CGFloat(o.rotation) * .pi / 180))
+        }
+        return img.transformed(by: CGAffineTransform(translationX: -img.extent.minX, y: -img.extent.minY))
+    }
 
     private static func applyCrop(_ crop: CGRect, to image: CIImage) -> CIImage {
         let ext = image.extent

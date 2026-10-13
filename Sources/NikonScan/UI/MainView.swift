@@ -7,10 +7,12 @@ import Combine
 enum DesignLayout {
     static let defaultSize      = CGSize(width: 1290, height: 792)
 
-    static let scannerWindow    = CGRect(x: 3, y: 0, width: 805, height: 285)
+    static let scannerWindow    = CGRect(x: 0, y: 0, width: 805, height: 285)
+    static var scannerWindowSize: CGSize { CGSize(width: scannerWindow.width, height: drawer.maxY + 2) }
+    static let imageMinSize     = CGSize(width: 360, height: 280)
     static let titleHeight: CGFloat = 22
     static let leftColumnWidth: CGFloat = 152
-    static let drawer           = CGRect(x: 3, y: 168, width: 176, height: 358)
+    static let drawer           = CGRect(x: 0, y: 168, width: 176, height: 358)
 
     static let imageLeft: CGFloat        = 380
     static let imageTop: CGFloat         = 311
@@ -27,177 +29,68 @@ enum DesignLayout {
 
 struct PixelRGB: Equatable { let r, g, b: Int }
 
-// MARK: - Main View
+// MARK: - Window roots
 
-struct MainView: View {
+/// Scanner window with the left drawer attached below its tool column.
+struct ScannerWindowRoot: View {
     @EnvironmentObject var scanner: ScannerManager
     @EnvironmentObject var settings: ScanSettings
-    @AppStorage("showToolPalette") private var showToolPalette = true
-    @AppStorage("showProgressWindow") private var showProgressWindow = true
-
-    @State private var showPreferences = false
-    @State private var showAbout = false
-    @State private var histogram = HistogramData.empty
-    @State private var viewImage: NSImage?
-    @State private var rawFrameImage: NSImage?
-    @State private var showErrorAlert = false
-    @State private var zoom: CGFloat?          // nil = fit to window
-    @State private var hoverRGB: PixelRGB?
+    @EnvironmentObject var workspace: Workspace
+    @EnvironmentObject var windows: WindowManager
 
     var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width, h = geo.size.height
-            let paletteX = w - DesignLayout.paletteRightGap - DesignLayout.paletteWidth
-            let imageRight = paletteX - DesignLayout.imageGapToPalette
-            let imageBottom = h - DesignLayout.imageBottomGap
+        ZStack(alignment: .topLeading) {
+            ScannerWindow(
+                onEject:      { scanner.eject() },
+                onPreviewAll: { Task { await scanner.autoPreviewAllFrames(settings: settings) } },
+                onZoomIn:     { workspace.zoomIn() },
+                onZoomOut:    { workspace.zoomOut() }
+            )
+            .frame(width: DesignLayout.scannerWindow.width, height: DesignLayout.scannerWindow.height)
 
-            ZStack(alignment: .topLeading) {
-                Color.aquaDesktop
-                WindowDragArea()
-
-                ImageWindow(
-                    image: viewImage,
-                    frameNumber: scanner.selectedFrame + 1,
-                    settings: settings,
-                    zoom: $zoom,
-                    hoverRGB: $hoverRGB
-                )
-                .frame(width: max(240, imageRight - DesignLayout.imageLeft),
-                       height: max(200, imageBottom - DesignLayout.imageTop))
-                .offset(x: DesignLayout.imageLeft, y: DesignLayout.imageTop)
-
-                if showProgressWindow {
-                    ProgressWindow(onClose: { showProgressWindow = false })
-                        .frame(width: DesignLayout.progressSize.width,
-                               height: DesignLayout.progressSize.height)
-                        .offset(x: DesignLayout.progressInset.x,
-                                y: max(DesignLayout.drawer.maxY + 8,
-                                       h - DesignLayout.progressInset.y - DesignLayout.progressSize.height))
-                }
-
-                if showToolPalette {
-                    ToolPaletteWindow(histogram: histogram, onClose: { showToolPalette = false })
-                        .frame(width: DesignLayout.paletteWidth, height: h - DesignLayout.paletteTop + 4)
-                        .offset(x: paletteX, y: DesignLayout.paletteTop)
-                }
-
-                ScannerWindow(
-                    onEject:      { scanner.eject() },
-                    onPreviewAll: { Task { await scanner.autoPreviewAllFrames(settings: settings) } },
-                    onZoomIn:     { zoomIn() },
-                    onZoomOut:    { zoomOut() }
-                )
-                .frame(width: DesignLayout.scannerWindow.width, height: DesignLayout.scannerWindow.height)
-                .offset(x: DesignLayout.scannerWindow.minX, y: DesignLayout.scannerWindow.minY)
-
-                LeftDrawer(
-                    image: viewImage,
-                    hoverRGB: hoverRGB,
-                    histogram: histogram,
-                    onPreview: { Task { await scanner.preview(settings: settings) } },
-                    onScan: {
-                        Task {
-                            await scanner.scan(settings: settings)
-                            // Hardware already applied crop — reset so ImageProcessor won't double-crop.
-                            settings.cropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
-                        }
-                    },
-                    onPrefs: { showPreferences = true },
-                    onHelp:  { showAbout = true },
-                    onTools: { showToolPalette.toggle() }
-                )
-                .frame(width: DesignLayout.drawer.width, height: DesignLayout.drawer.height)
-                .offset(x: DesignLayout.drawer.minX, y: DesignLayout.drawer.minY)
-            }
+            LeftDrawer(
+                image: workspace.viewImage,
+                hoverRGB: workspace.hoverRGB,
+                histogram: workspace.histogram,
+                onPreview: { workspace.preview() },
+                onScan: { workspace.scan() },
+                onPrefs: { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) },
+                onHelp:  { NSApp.orderFrontStandardAboutPanel(nil) },
+                onTools: { windows.showPalette.toggle() }
+            )
+            .frame(width: DesignLayout.drawer.width, height: DesignLayout.drawer.height)
+            .offset(y: DesignLayout.drawer.minY)
         }
-        .ignoresSafeArea()
-        .background(WindowConfigurator(title: scannerTitle(scanner.connectedScanner)))
-        .preferredColorScheme(.light)
-        .onAppear {
-            settings.applyDefaultsFromPreferences()
-        }
-        .onReceive(scanner.$selectedFrame) { frame in
-            if let raw = scanner.framePreviews[frame] {
-                setRawImage(raw)
-            } else {
-                rawFrameImage = nil
-                viewImage = nil
-                scanner.displayedImage = nil
-            }
-        }
-        .onReceive(scanner.$framePreviews) { previews in
-            if let raw = previews[scanner.selectedFrame] {
-                setRawImage(raw)
-            }
-        }
-        .onReceive(
-            settings.objectWillChange
-                .debounce(for: .milliseconds(100), scheduler: RunLoop.main)
-        ) { _ in
-            guard let raw = rawFrameImage else { return }
-            refreshDisplay(from: raw)
-        }
-        .onReceive(scanner.$lastError) { error in
-            if error != nil { showErrorAlert = true }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .nikonRedrawRequested)) { _ in
-            if let raw = rawFrameImage { refreshDisplay(from: raw) }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .nikonSaveRequested)) { _ in
-            saveCurrentImage()
-        }
-        .alert("Scanner Error", isPresented: $showErrorAlert) {
-            Button("OK") { scanner.lastError = nil }
-        } message: {
-            Text(scanner.lastError ?? "Unknown error")
-        }
-        .sheet(isPresented: $showPreferences) {
-            PreferencesView().preferredColorScheme(.light)
-        }
-        .sheet(isPresented: $showAbout) {
-            AboutView().preferredColorScheme(.light)
-        }
-    }
-
-    private func zoomIn()  { zoom = min(8, (zoom ?? 1) * 1.5) }
-    private func zoomOut() {
-        let next = (zoom ?? 1) / 1.5
-        zoom = next <= 1.01 ? nil : next
-    }
-
-    private func setRawImage(_ raw: NSImage) {
-        rawFrameImage = raw
-        refreshDisplay(from: raw)
-    }
-
-    private func refreshDisplay(from raw: NSImage) {
-        // The view shows the full frame; the crop is drawn as a marquee on top.
-        if settings.showOriginal {
-            viewImage = raw
-        } else {
-            viewImage = ImageProcessor.apply(settings: settings, to: raw, includeCrop: false)
-        }
-        scanner.displayedImage = viewImage
-        if let img = viewImage { histogram = HistogramData.compute(from: img) }
-    }
-
-    private func saveCurrentImage() {
-        guard let raw = rawFrameImage else { return }
-        let image = ImageProcessor.apply(settings: settings, to: raw)
-        do {
-            let url = try scanner.saveImage(image, settings: settings)
-            scanner.statusMessage = "Saved: \(url.lastPathComponent)"
-        } catch ScannerError.saveCancelled {
-            // user dismissed
-        } catch {
-            scanner.lastError = error.localizedDescription
-            showErrorAlert = true
-        }
+        .frame(width: DesignLayout.scannerWindowSize.width, height: DesignLayout.scannerWindowSize.height,
+               alignment: .topLeading)
     }
 }
 
-extension Notification.Name {
-    static let nikonSaveRequested = Notification.Name("nikonSaveRequested")
+struct ImageWindowRoot: View {
+    @EnvironmentObject var scanner: ScannerManager
+    @EnvironmentObject var settings: ScanSettings
+    @EnvironmentObject var workspace: Workspace
+
+    var body: some View {
+        ImageWindow(
+            image: workspace.viewImage,
+            frameNumber: scanner.selectedFrame + 1,
+            orientation: settings.orientation(for: scanner.selectedFrame),
+            settings: settings,
+            zoom: $workspace.zoom,
+            hoverRGB: $workspace.hoverRGB
+        )
+        .padding(.bottom, 1)
+    }
+}
+
+struct ToolPaletteRoot: View {
+    @EnvironmentObject var workspace: Workspace
+    var onClose: () -> Void
+
+    var body: some View {
+        ToolPaletteWindow(histogram: workspace.histogram, onClose: onClose)
+    }
 }
 
 func scannerTitle(_ device: ScannerDevice?) -> String {
@@ -222,6 +115,7 @@ func scannerTitle(_ device: ScannerDevice?) -> String {
 struct ScannerWindow: View {
     @EnvironmentObject var scanner: ScannerManager
     @EnvironmentObject var settings: ScanSettings
+    @EnvironmentObject var windows: WindowManager
     var onEject: () -> Void
     var onPreviewAll: () -> Void
     var onZoomIn: () -> Void
@@ -235,9 +129,9 @@ struct ScannerWindow: View {
                 AquaTitleBar(
                     title: scannerTitle(scanner.connectedScanner),
                     height: DesignLayout.titleHeight,
-                    onClose:    { NSApp.keyWindow?.performClose(nil) },
-                    onMinimize: { NSApp.keyWindow?.miniaturize(nil) },
-                    onZoom:     { NSApp.keyWindow?.zoom(nil) },
+                    onClose:    { windows.closeScannerWindow() },
+                    onMinimize: { windows.minimizeScannerWindow() },
+                    onZoom:     { windows.showAll() },
                     onTitleClick: showScannerMenu
                 )
                 .help("Click to choose scanner")
@@ -326,6 +220,7 @@ struct ScannerWindow: View {
 
 struct FrameGridArea: View {
     @EnvironmentObject var scanner: ScannerManager
+    @EnvironmentObject var settings: ScanSettings
 
     private let pitch = CGSize(width: 148.4, height: 102)
     private let origin = CGPoint(x: 40.6, y: 34.8)
@@ -344,6 +239,7 @@ struct FrameGridArea: View {
                                     index: i,
                                     image: scanner.framePreviews[i],
                                     state: scanner.jobState(for: i),
+                                    orientation: settings.orientation(for: i),
                                     isPrimary: scanner.selectedFrame == i,
                                     inSelection: scanner.selectedFrames.contains(i)
                                 ) { cmd, shift in
@@ -429,6 +325,7 @@ struct FrameThumb: View {
     let index: Int
     let image: NSImage?
     let state: ScannerManager.FrameJobState
+    var orientation = FrameOrientation()
     let isPrimary: Bool
     let inSelection: Bool
     let onTap: (_ cmd: Bool, _ shift: Bool) -> Void
@@ -440,9 +337,14 @@ struct FrameThumb: View {
 
                 Group {
                     if let image {
+                        let inner = CGSize(width: Self.size.width - 9, height: Self.size.height - 8)
                         Image(nsImage: image)
                             .resizable()
-                            .scaledToFill()
+                            .aspectRatio(contentMode: orientation.swapsAxes ? .fit : .fill)
+                            .frame(width: orientation.swapsAxes ? inner.height : inner.width,
+                                   height: orientation.swapsAxes ? inner.width : inner.height)
+                            .scaleEffect(x: orientation.flipHorizontal ? -1 : 1, y: orientation.flipVertical ? -1 : 1)
+                            .rotationEffect(.degrees(Double(orientation.rotation)))
                     } else {
                         LinearGradient(colors: [Color(hex: 0x2A2A2A), Color(hex: 0x1A1A1A)],
                                        startPoint: .top, endPoint: .bottom)
@@ -543,7 +445,8 @@ struct LeftDrawer: View {
             DrawerShape()
                 .fill(Color.aquaSidePanel)
                 .overlay(DrawerShape().stroke(Color(hex: 0x6E6E6E), lineWidth: 1))
-                .shadow(color: .black.opacity(0.3), radius: 4, x: 2, y: 2)
+
+            WindowDragArea().padding(.top, 10).padding(.trailing, 10)
 
             orb("Prefs", color: Color(hex: 0x8CC4F2), dark: Color(hex: 0x2A6CB8), center: CGPoint(x: 33.5, y: 59.4), action: onPrefs)
             orb("Help",  color: Color(hex: 0x9EE6CF), dark: Color(hex: 0x2F9A80), center: CGPoint(x: 87.1, y: 45.2), action: onHelp)

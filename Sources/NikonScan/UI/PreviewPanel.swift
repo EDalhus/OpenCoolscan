@@ -6,6 +6,7 @@ import AppKit
 struct ImageWindow: View {
     let image: NSImage?
     let frameNumber: Int
+    let orientation: FrameOrientation
     @ObservedObject var settings: ScanSettings
     @Binding var zoom: CGFloat?
     @Binding var hoverRGB: PixelRGB?
@@ -45,11 +46,13 @@ struct ImageWindow: View {
                         Color.white.frame(width: scroller)
                     }
                     .frame(height: topRuler)
+                    .overlay(WindowDragArea())
                     .overlay(alignment: .bottom) { Color(hex: 0x9A9A9A).frame(height: 1) }
 
                     HStack(spacing: 0) {
                         RulerView(axis: .vertical, imageRect: rect, pixelLength: pixelLength(.vertical))
                             .frame(width: leftRuler)
+                            .overlay(WindowDragArea())
                             .overlay(alignment: .trailing) { Color(hex: 0x9A9A9A).frame(width: 1) }
                         imageArea(rect: rect)
                             .frame(width: content.width, height: content.height)
@@ -59,7 +62,9 @@ struct ImageWindow: View {
 
                     HStack(spacing: 0) {
                         ScrollerTrack(axis: .horizontal)
-                        GrowBox().frame(width: scroller)
+                        GrowBox()
+                            .overlay(WindowResizeHandle(minSize: DesignLayout.imageMinSize))
+                            .frame(width: scroller)
                     }
                     .frame(height: scroller)
                 }
@@ -70,7 +75,6 @@ struct ImageWindow: View {
             }
             .background { Color.white }
             .overlay(Rectangle().stroke(Color(hex: 0x6A6A6A), lineWidth: 1))
-            .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 3)
         }
         .onAppear { rebuildSampler() }
         .onChange(of: image) { _ in rebuildSampler() }
@@ -97,7 +101,11 @@ struct ImageWindow: View {
                     .offset(x: rect.minX, y: rect.minY)
 
                 if !settings.showOriginal {
-                    CropOverlay(cropRect: $settings.cropRect)
+                    // The crop is stored in raw scanner space; draw it in the rotated view.
+                    CropOverlay(cropRect: Binding(
+                        get: { orientation.toDisplay(settings.cropRect) },
+                        set: { settings.cropRect = orientation.toRaw($0) }
+                    ))
                         .frame(width: rect.width, height: rect.height)
                         .offset(x: rect.minX, y: rect.minY)
                 }

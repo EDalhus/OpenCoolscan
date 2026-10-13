@@ -134,36 +134,3 @@ struct PreferencesView: View {
         return "scanimage not found. Install SANE (brew install sane-backends) and coolscan3."
     }
 }
-
-struct AboutView: View {
-    @Environment(\.dismiss) var dismiss
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "scanner")
-                .font(.system(size: 60))
-                .foregroundStyle(Color.accentColor)
-
-            Text("Nikon Scan Re:make")
-                .font(.title2.bold())
-
-            Text("Version 1.1")
-                .foregroundStyle(.secondary)
-
-            Text("A modern macOS reimplementation of Nikon Scan 4\nfor Apple Silicon and Intel Macs")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .font(.caption)
-
-            Text("Supports: LS-4000 ED, LS-5000 ED, LS-8000 ED, LS-9000 ED,\nLS-40, LS-50, LS-2000, LS-30 — via SANE coolscan3")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .font(.caption)
-
-            Button("Close") { dismiss() }
-                .buttonStyle(.borderedProminent)
-        }
-        .padding(32)
-        .frame(width: 380)
-    }
-}

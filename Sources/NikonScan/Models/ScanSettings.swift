@@ -199,6 +199,63 @@ struct Curves: Equatable {
     var blue:      ToneCurve = .linear
 }
 
+/// Rotation (clockwise degrees) and mirroring applied to a frame after scanning.
+/// Display space = rotate(flip(raw)).
+struct FrameOrientation: Equatable {
+    var rotation = 0          // 0, 90, 180, 270 — clockwise
+    var flipHorizontal = false
+    var flipVertical = false
+
+    var isIdentity: Bool { rotation == 0 && !flipHorizontal && !flipVertical }
+    var swapsAxes: Bool { rotation == 90 || rotation == 270 }
+
+    mutating func rotate(by degrees: Int) {
+        rotation = ((rotation + degrees) % 360 + 360) % 360
+    }
+
+    /// Mirrors in display space (left↔right as the user sees it).
+    mutating func flipDisplayHorizontal() {
+        if swapsAxes { flipVertical.toggle() } else { flipHorizontal.toggle() }
+    }
+
+    mutating func flipDisplayVertical() {
+        if swapsAxes { flipHorizontal.toggle() } else { flipVertical.toggle() }
+    }
+
+    /// Normalized point (top-left origin) from raw to display space.
+    func toDisplay(_ p: CGPoint) -> CGPoint {
+        var q = p
+        if flipHorizontal { q.x = 1 - q.x }
+        if flipVertical { q.y = 1 - q.y }
+        switch rotation {
+        case 90:  return CGPoint(x: 1 - q.y, y: q.x)
+        case 180: return CGPoint(x: 1 - q.x, y: 1 - q.y)
+        case 270: return CGPoint(x: q.y, y: 1 - q.x)
+        default:  return q
+        }
+    }
+
+    func toRaw(_ p: CGPoint) -> CGPoint {
+        var q: CGPoint
+        switch rotation {
+        case 90:  q = CGPoint(x: p.y, y: 1 - p.x)
+        case 180: q = CGPoint(x: 1 - p.x, y: 1 - p.y)
+        case 270: q = CGPoint(x: 1 - p.y, y: p.x)
+        default:  q = p
+        }
+        if flipHorizontal { q.x = 1 - q.x }
+        if flipVertical { q.y = 1 - q.y }
+        return q
+    }
+
+    func toDisplay(_ r: CGRect) -> CGRect { Self.bounding(toDisplay(r.origin), toDisplay(CGPoint(x: r.maxX, y: r.maxY))) }
+    func toRaw(_ r: CGRect) -> CGRect { Self.bounding(toRaw(r.origin), toRaw(CGPoint(x: r.maxX, y: r.maxY))) }
+
+    private static func bounding(_ a: CGPoint, _ b: CGPoint) -> CGRect {
+        CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
+    }
+}
+
 class ScanSettings: ObservableObject {
     @Published var filmType: FilmType = .colorNegative
     @Published var resolution: Int = 2400
@@ -248,13 +305,35 @@ class ScanSettings: ObservableObject {
     @Published var multiScanCount: Int = 4     // 4 or 8x averaging
 
     // Display
-    @Published var rotation: Int = 0  // 0, 90, 180, 270 degrees
+    /// Per-frame orientation; frames without an entry use `defaultOrientation`.
+    @Published var frameOrientations: [Int: FrameOrientation] = [:]
+    @Published var defaultOrientation = FrameOrientation()
+    /// Layout Tools ▸ "Apply to all frames"
+    @Published var orientationAppliesToAll = true
     @Published var showOriginal: Bool = false
     @Published var activePreset: FilmPreset = .none
 
     // Frame alignment
     @Published var autoAlign: Bool = true
     @Published var alignmentOffset: Int = 0  // extra pixels to trim from right (+) or restore (-)
+
+    func orientation(for frame: Int) -> FrameOrientation {
+        frameOrientations[frame] ?? defaultOrientation
+    }
+
+    /// Changes the orientation of `frame`, or of every frame when "Apply to all frames" is on.
+    func updateOrientation(frame: Int, _ change: (inout FrameOrientation) -> Void) {
+        if orientationAppliesToAll {
+            var o = orientation(for: frame)
+            change(&o)
+            defaultOrientation = o
+            frameOrientations = [:]
+        } else {
+            var o = orientation(for: frame)
+            change(&o)
+            frameOrientations[frame] = o
+        }
+    }
 
     var isGrayscale: Bool {
         !filmType.isColor || colorSpace == .gray
@@ -288,7 +367,8 @@ class ScanSettings: ObservableObject {
         deeShadow = 50
         sieEnabled = false
         cropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
-        rotation = 0
+        frameOrientations = [:]
+        defaultOrientation = FrameOrientation()
         autoAlign = true
         alignmentOffset = 0
         activePreset = .none

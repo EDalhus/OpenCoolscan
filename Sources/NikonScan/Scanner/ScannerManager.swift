@@ -568,7 +568,7 @@ class ScannerManager: ObservableObject {
     }
 
     /// Batch-save all frames in `scannedFrames` (or selected previews) into a chosen folder.
-    func saveBatch(settings: ScanSettings, processed: (NSImage) -> NSImage) throws -> Int {
+    func saveBatch(settings: ScanSettings, processed: (Int, NSImage) -> NSImage) throws -> Int {
         let frames = scannedFrames.isEmpty
             ? selectedFrames.compactMap { idx -> (Int, NSImage)? in
                 guard let img = framePreviews[idx] else { return nil }
@@ -593,7 +593,7 @@ class ScannerManager: ObservableObject {
         var saved = 0
         let stamp = Int(Date().timeIntervalSince1970)
         for (index, raw) in frames {
-            let image = processed(raw)
+            let image = processed(index, raw)
             let name = "Scan_\(stamp)_frame\(String(format: "%02d", index + 1)).\(settings.outputFormat.fileExtension)"
             let url = dir.appendingPathComponent(name)
             try writeImage(image, to: url, settings: settings)
@@ -614,7 +614,7 @@ class ScannerManager: ObservableObject {
                 "Scan_\(stamp)_frame\(String(format: "%02d", index + 1)).\(settings.outputFormat.fileExtension)"
             )
             do {
-                try writeImage(image, to: url, settings: settings)
+                try writeImage(ImageProcessor.orient(image, settings.orientation(for: index)), to: url, settings: settings)
                 count += 1
             } catch {
                 lastError = "Auto-save failed: \(error.localizedDescription)"

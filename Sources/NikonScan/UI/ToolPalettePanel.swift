@@ -8,6 +8,7 @@ struct ToolPaletteWindow: View {
     var onClose: () -> Void
 
     enum Section: String, CaseIterable, Identifiable {
+        case layoutTools    = "Layout Tools"
         case curves         = "Curves"
         case colorBalance   = "Color Balance"
         case unsharpMask    = "Unsharp Mask"
@@ -64,6 +65,7 @@ struct ToolPaletteWindow: View {
     @ViewBuilder
     private func content(for section: Section) -> some View {
         switch section {
+        case .layoutTools:   LayoutToolsContent()
         case .curves:        CurvesContent(histogram: histogram)
         case .colorBalance:  ColorBalanceContent()
         case .unsharpMask:   UnsharpMaskContent()

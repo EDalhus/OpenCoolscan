@@ -42,6 +42,57 @@ private struct PaletteLabel: View {
     }
 }
 
+// MARK: Layout Tools (rotate / flip — applied to previews, scans and saved files)
+
+struct LayoutToolsContent: View {
+    @EnvironmentObject var settings: ScanSettings
+    @EnvironmentObject var scanner: ScannerManager
+
+    private var current: FrameOrientation { settings.orientation(for: scanner.selectedFrame) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                AquaBevelButton(systemImage: "rotate.left", size: 26, help: "Rotate 90° left") { change { $0.rotate(by: -90) } }
+                AquaBevelButton(systemImage: "rotate.right", size: 26, help: "Rotate 90° right") { change { $0.rotate(by: 90) } }
+                AquaBevelButton(systemImage: "arrow.triangle.2.circlepath", size: 26, help: "Rotate 180°") { change { $0.rotate(by: 180) } }
+                AquaBevelButton(systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right", size: 26,
+                                pressed: current.swapsAxes ? current.flipVertical : current.flipHorizontal,
+                                help: "Flip horizontal") { change { $0.flipDisplayHorizontal() } }
+                AquaBevelButton(systemImage: "arrow.up.and.down.righttriangle.up.righttriangle.down", size: 26,
+                                pressed: current.swapsAxes ? current.flipHorizontal : current.flipVertical,
+                                help: "Flip vertical") { change { $0.flipDisplayVertical() } }
+            }
+            .frame(maxWidth: .infinity)
+
+            PaletteLabel(summary)
+
+            AquaCheckbox(title: "Apply to all frames", isOn: $settings.orientationAppliesToAll)
+
+            HStack {
+                PaletteButton(title: "Help") {
+                    showHelp("Layout Tools", "Rotates or mirrors the image. The orientation is shown in the preview and thumbnails and is applied when scans are saved, so files come out the right way up.\n\nWith “Apply to all frames” off, only the selected frame changes.")
+                }
+                Spacer()
+                PaletteButton(title: "Reset") { change { $0 = FrameOrientation() } }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+    }
+
+    private var summary: String {
+        var parts = ["Rotation: \(current.rotation)°"]
+        if current.flipHorizontal || current.flipVertical { parts.append("Mirrored") }
+        let scope = settings.orientationAppliesToAll ? "all frames" : "frame \(scanner.selectedFrame + 1)"
+        return parts.joined(separator: " · ") + " — " + scope
+    }
+
+    private func change(_ body: (inout FrameOrientation) -> Void) {
+        settings.updateOrientation(frame: scanner.selectedFrame, body)
+    }
+}
+
 // MARK: Curves
 
 struct CurvesContent: View {

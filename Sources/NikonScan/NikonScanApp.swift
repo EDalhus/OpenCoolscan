@@ -3,35 +3,27 @@ import AppKit
 
 @main
 struct NikonScanApp: App {
-    @StateObject private var scannerManager = ScannerManager()
-    @StateObject private var scanSettings   = ScanSettings()
-    @AppStorage("showToolPalette") private var showToolPalette = true
-    @AppStorage("showProgressWindow") private var showProgressWindow = true
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var scannerManager = AppModel.shared.scanner
+    @StateObject private var scanSettings   = AppModel.shared.settings
+    @StateObject private var windows        = AppModel.shared.windows
 
     var body: some Scene {
-        WindowGroup {
-            MainView()
-                .environmentObject(scannerManager)
+        // The scanner, image, progress and palette windows are free-floating
+        // NSWindows managed by WindowManager; this scene only provides Preferences.
+        Settings {
+            PreferencesView()
                 .environmentObject(scanSettings)
-                .frame(minWidth: 1150, minHeight: 760)
+                .preferredColorScheme(.light)
         }
-        .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: DesignLayout.defaultSize.width, height: DesignLayout.defaultSize.height)
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandMenu("Scanner") {
-                Button("Preview") {
-                    Task { await scannerManager.preview(settings: scanSettings) }
-                }
+                Button("Preview") { AppModel.shared.workspace.preview() }
                 .keyboardShortcut("p", modifiers: .command)
                 .disabled(scannerManager.connectedScanner == nil || scannerManager.isBusy)
 
-                Button("Scan") {
-                    Task {
-                        await scannerManager.scan(settings: scanSettings)
-                        scanSettings.cropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
-                    }
-                }
+                Button("Scan") { AppModel.shared.workspace.scan() }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
                 .disabled(scannerManager.connectedScanner == nil || scannerManager.isBusy)
 
@@ -61,20 +53,32 @@ struct NikonScanApp: App {
             }
 
             CommandMenu("Tools") {
-                Toggle("Tool Palette", isOn: $showToolPalette)
+                Toggle("Tool Palette", isOn: $windows.showPalette)
                     .keyboardShortcut("t", modifiers: [.command, .option])
-                Toggle("Progress", isOn: $showProgressWindow)
+                Toggle("Progress", isOn: $windows.showProgress)
                 Toggle("Auto-Align Frame", isOn: $scanSettings.autoAlign)
                 Divider()
-                Button("Rotate Left") { scanSettings.rotation = (scanSettings.rotation + 270) % 360 }
+                Button("Rotate Left") { AppModel.shared.workspace.rotate(by: -90) }
                     .keyboardShortcut("[", modifiers: .command)
-                Button("Rotate Right") { scanSettings.rotation = (scanSettings.rotation + 90) % 360 }
+                Button("Rotate Right") { AppModel.shared.workspace.rotate(by: 90) }
                     .keyboardShortcut("]", modifiers: .command)
+                Button("Rotate 180°") { AppModel.shared.workspace.rotate(by: 180) }
+                Button("Flip Horizontal") {
+                    scanSettings.updateOrientation(frame: scannerManager.selectedFrame) { $0.flipDisplayHorizontal() }
+                }
+                Button("Flip Vertical") {
+                    scanSettings.updateOrientation(frame: scannerManager.selectedFrame) { $0.flipDisplayVertical() }
+                }
+
+                Divider()
+
+                Button("Show All Windows") { windows.showAll() }
+                    .keyboardShortcut("0", modifiers: .command)
             }
 
             CommandGroup(after: .saveItem) {
                 Button("Save Scan...") {
-                    NotificationCenter.default.post(name: .nikonSaveRequested, object: nil)
+                    AppModel.shared.workspace.saveCurrentImage()
                 }
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(scannerManager.previewImage == nil
@@ -88,15 +92,7 @@ struct NikonScanApp: App {
                 }
 
                 Button("Batch Save Frames...") {
-                    do {
-                        _ = try scannerManager.saveBatch(settings: scanSettings) { raw in
-                            ImageProcessor.apply(settings: scanSettings, to: raw)
-                        }
-                    } catch ScannerError.saveCancelled {
-                        // dismissed
-                    } catch {
-                        scannerManager.lastError = error.localizedDescription
-                    }
+                    AppModel.shared.workspace.saveBatch()
                 }
                 .disabled(scannerManager.scannedFrames.isEmpty && scannerManager.framePreviews.isEmpty)
             }
